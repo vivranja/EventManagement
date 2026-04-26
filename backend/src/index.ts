@@ -8,7 +8,7 @@ import layoutRoutes from './routes/layouts';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.PORT) || 4000;
 
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -27,8 +27,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 EventFlow API → http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
 
 export default app;
