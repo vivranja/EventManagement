@@ -7,6 +7,7 @@ interface Props {
   isSelected: boolean;
   onSelect: () => void;
   onChange: (updates: Partial<CanvasElement>) => void;
+  onDragEndCommit?: () => void;
   snapEnabled: boolean;
   gridSize: number;
   stageRef?: React.RefObject<unknown>;
