@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  PLANNER
+  CLIENT
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(PLANNER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects       Project[]
+  sharedProjects ProjectShare[]
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  venueWidth  Float     @default(1000)
+  venueHeight Float     @default(750)
+  eventDate   DateTime?
+  ownerId     String
+  shareToken  String    @unique @default(uuid())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  owner   User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  layouts Layout[]
+  shares  ProjectShare[]
+}
+
+model Layout {
+  id         String   @id @default(uuid())
+  projectId  String
+  name       String   @default("Untitled Layout")
+  layoutJson Json
+  version    Int      @default(1)
+  isActive   Boolean  @default(true)
+  thumbnail  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ProjectShare {
+  id        String   @id @default(uuid())
+  projectId String
+  userId    String
+  canEdit   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+}
