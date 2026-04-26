@@ -9,6 +9,8 @@
     "db:migrate": "cd backend && npx prisma migrate dev",
     "db:generate": "cd backend && npx prisma generate",
     "db:seed": "cd backend && npm run db:seed",
-    "db:studio": "cd backend && npx prisma studio"
+    "db:studio": "cd backend && npx prisma studio",
+    "build": "tsc",
+    "start": "node dist/index.js"
   }
 }
