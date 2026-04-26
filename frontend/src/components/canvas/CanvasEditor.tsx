@@ -6,7 +6,7 @@ import ElementShape from './ElementShape';
 import type Konva from 'konva';
 
 interface Props {
-  stageRef: React.RefObject<Konva.Stage | null>;
+  stageRef: React.RefObject<Konva.Stage>;
 }
 
 export default function CanvasEditor({ stageRef }: Props) {
