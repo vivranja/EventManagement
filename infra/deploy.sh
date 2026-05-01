@@ -1,67 +1,68 @@
 #!/usr/bin/env bash
-# EventFlow — AWS deploy script
-# Usage: ./infra/deploy.sh
-
+# EventFlow deploy script — backend + frontend on one ALB
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
 STACK_NAME="eventflow"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/eventflow-backend"
+BACKEND_ECR="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/eventflow-backend"
+FRONTEND_ECR="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/eventflow-frontend"
 
 echo "▶ Account: ${ACCOUNT_ID}  Region: ${AWS_REGION}"
 
-# ── Phase 1: Deploy infrastructure WITHOUT ECS service (DesiredCount=0)
-# This creates DDB, S3, ECR, IAM roles, ALB — but starts 0 tasks
-echo "▶ Phase 1: Deploying infrastructure (no ECS tasks yet)..."
+# ── Phase 1: infrastructure with DesiredCount=0 (no tasks start yet)
+echo "▶ Phase 1: Deploying infrastructure..."
 aws cloudformation deploy \
   --template-file infra/cloudformation.yaml \
   --stack-name "${STACK_NAME}" \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
-    VpcId="${VPC_ID:?Set VPC_ID env var}" \
-    PublicSubnetIds="${SUBNET_IDS:?Set SUBNET_IDS env var (comma-separated)}" \
-    JwtSecret="${JWT_SECRET:?Set JWT_SECRET env var}" \
-    FrontendUrl="${FRONTEND_URL:-http://localhost:3000}" \
-    EcrImageUri="${ECR_URI}:latest" \
-    DesiredCount=0 \
+    VpcId="${VPC_ID:?Set VPC_ID}" \
+    PublicSubnetIds="${SUBNET_IDS:?Set SUBNET_IDS}" \
+    JwtSecret="${JWT_SECRET:?Set JWT_SECRET}" \
+    BackendDesiredCount=0 \
+    FrontendDesiredCount=0 \
   --no-fail-on-empty-changeset
 
-# ── Phase 2: Build & push Docker image (AMD64 for Fargate)
+# ── Phase 2: build & push images
 echo "▶ Phase 2: Logging in to ECR..."
 aws ecr get-login-password --region "${AWS_REGION}" \
   | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-echo "▶ Building Docker image (linux/amd64)..."
+echo "▶ Building backend (linux/amd64)..."
 docker build --platform linux/amd64 -t eventflow-backend ./backend
+docker tag eventflow-backend:latest "${BACKEND_ECR}:latest"
+docker push "${BACKEND_ECR}:latest"
 
-echo "▶ Tagging & pushing..."
-docker tag eventflow-backend:latest "${ECR_URI}:latest"
-docker push "${ECR_URI}:latest"
+echo "▶ Building frontend (linux/amd64)..."
+docker build --platform linux/amd64 \
+  --build-arg NEXT_PUBLIC_API_URL=/api \
+  -t eventflow-frontend ./frontend
+docker tag eventflow-frontend:latest "${FRONTEND_ECR}:latest"
+docker push "${FRONTEND_ECR}:latest"
 
-# ── Phase 3: Scale ECS service up to 1 now that image exists
-echo "▶ Phase 3: Scaling ECS service to 1..."
-aws ecs update-service \
-  --cluster eventflow \
-  --service eventflow-backend \
-  --desired-count 1 \
-  --force-new-deployment \
-  --region "${AWS_REGION}" \
-  --output text --query 'service.serviceName'
+# ── Phase 3: scale up
+echo "▶ Phase 3: Scaling up services..."
+aws ecs update-service --cluster eventflow --service eventflow-backend \
+  --desired-count 1 --force-new-deployment \
+  --region "${AWS_REGION}" --output text --query 'service.serviceName'
 
-echo "▶ Waiting for service to stabilize (up to 5 min)..."
+aws ecs update-service --cluster eventflow --service eventflow-frontend \
+  --desired-count 1 --force-new-deployment \
+  --region "${AWS_REGION}" --output text --query 'service.serviceName'
+
+echo "▶ Waiting for services to stabilize (up to 10 min)..."
 aws ecs wait services-stable \
   --cluster eventflow \
-  --services eventflow-backend \
+  --services eventflow-backend eventflow-frontend \
   --region "${AWS_REGION}"
 
-# ── Print backend URL
-BACKEND_URL=$(aws cloudformation describe-stacks \
+APP_URL=$(aws cloudformation describe-stacks \
   --stack-name "${STACK_NAME}" \
-  --query "Stacks[0].Outputs[?OutputKey=='BackendUrl'].OutputValue" \
+  --query "Stacks[0].Outputs[?OutputKey=='AppUrl'].OutputValue" \
   --output text)
 
 echo ""
 echo "✅  Deploy complete!"
-echo "   Backend API : ${BACKEND_URL}"
-echo "   Set NEXT_PUBLIC_API_URL=${BACKEND_URL} in your Amplify environment"
+echo "   App : ${APP_URL}"
+echo "   API : ${APP_URL}/api"

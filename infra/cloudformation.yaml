@@ -1,39 +1,24 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: EventFlow - DynamoDB + S3 + ECS Fargate + ALB
+Description: EventFlow - DynamoDB + S3 + ECS Fargate (backend + frontend) + ALB
 
-# ─── PARAMETERS ───────────────────────────────────────────────────────────────
 Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
-    Description: VPC to deploy into (use your default VPC)
-
   PublicSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: At least 2 public subnets (for ALB + ECS tasks)
-
   JwtSecret:
     Type: String
     NoEcho: true
-    Description: JWT signing secret
-
-  FrontendUrl:
-    Type: String
-    Default: http://localhost:3000
-    Description: Frontend origin for CORS (Amplify URL after deploy)
-
-  EcrImageUri:
-    Type: String
-    Description: "ECR image URI, e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/eventflow-backend:latest"
-
   TableName:
     Type: String
     Default: eventflow
-
-  DesiredCount:
+  BackendDesiredCount:
+    Type: Number
+    Default: 1
+  FrontendDesiredCount:
     Type: Number
     Default: 1
 
-# ─── RESOURCES ────────────────────────────────────────────────────────────────
 Resources:
 
   # ── DynamoDB ──────────────────────────────────────────────────────────────
@@ -67,7 +52,7 @@ Resources:
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
-  # ── S3 Bucket (layout JSON) ───────────────────────────────────────────────
+  # ── S3 ────────────────────────────────────────────────────────────────────
   LayoutsBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -75,42 +60,26 @@ Resources:
       BucketName: !Sub 'eventflow-layouts-${AWS::AccountId}'
       VersioningConfiguration:
         Status: Enabled
-      LifecycleConfiguration:
-        Rules:
-          - Id: ExpireOldVersions
-            Status: Enabled
-            NoncurrentVersionExpiration:
-              NoncurrentDays: 30
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      CorsConfiguration:
-        CorsRules:
-          - AllowedOrigins: ['*']
-            AllowedMethods: [GET, PUT]
-            AllowedHeaders: ['*']
-            MaxAge: 3000
 
-  # ── ECR Repository ────────────────────────────────────────────────────────
-  EcrRepository:
+  # ── ECR ───────────────────────────────────────────────────────────────────
+  BackendEcrRepo:
     Type: AWS::ECR::Repository
     DeletionPolicy: Retain
     Properties:
       RepositoryName: eventflow-backend
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [{
-              "rulePriority": 1,
-              "description": "Keep last 5 images",
-              "selection": { "tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 5 },
-              "action": { "type": "expire" }
-            }]
-          }
 
-  # ── IAM: ECS Task Execution Role ─────────────────────────────────────────
+  FrontendEcrRepo:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    Properties:
+      RepositoryName: eventflow-frontend
+
+  # ── IAM ───────────────────────────────────────────────────────────────────
   TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -124,7 +93,6 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-  # ── IAM: ECS Task Role (DynamoDB + S3 access) ────────────────────────────
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -157,17 +125,20 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
                 Resource: !Sub 'arn:aws:s3:::eventflow-layouts-${AWS::AccountId}/*'
 
-  # ── CloudWatch Log Group ──────────────────────────────────────────────────
-  LogGroup:
+  # ── CloudWatch ────────────────────────────────────────────────────────────
+  BackendLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /ecs/eventflow-backend
+      RetentionInDays: 14
+
+  FrontendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/eventflow-frontend
       RetentionInDays: 14
 
   # ── ECS Cluster ───────────────────────────────────────────────────────────
@@ -177,7 +148,7 @@ Resources:
       ClusterName: eventflow
       CapacityProviders: [FARGATE, FARGATE_SPOT]
 
-  # ── Security Group: ALB ───────────────────────────────────────────────────
+  # ── Security Groups ───────────────────────────────────────────────────────
   AlbSg:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -185,25 +156,20 @@ Resources:
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
-        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
 
-  # ── Security Group: ECS Tasks ─────────────────────────────────────────────
   EcsSg:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: EventFlow ECS Tasks
       VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 4000
-          ToPort: 4000
-          SourceSecurityGroupId: !Ref AlbSg
+        - { IpProtocol: tcp, FromPort: 3000, ToPort: 4000, SourceSecurityGroupId: !Ref AlbSg }
 
   # ── ALB ───────────────────────────────────────────────────────────────────
-  BackendAlb:
+  AppAlb:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: eventflow-backend
+      Name: eventflow
       Scheme: internet-facing
       Type: application
       Subnets: !Ref PublicSubnetIds
@@ -222,18 +188,58 @@ Resources:
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
 
-  BackendListener:
+  FrontendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: eventflow-frontend
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 3000
+      TargetType: ip
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200-399'
+
+  # Default → frontend; /api/* and /health → backend
+  AppListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      LoadBalancerArn: !Ref BackendAlb
+      LoadBalancerArn: !Ref AppAlb
       Protocol: HTTP
       Port: 80
       DefaultActions:
         - Type: forward
+          TargetGroupArn: !Ref FrontendTargetGroup
+
+  ApiListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref AppListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values: ['/api/*']
+      Actions:
+        - Type: forward
           TargetGroupArn: !Ref BackendTargetGroup
 
-  # ── ECS Task Definition ───────────────────────────────────────────────────
-  TaskDefinition:
+  HealthListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref AppListener
+      Priority: 20
+      Conditions:
+        - Field: path-pattern
+          Values: ['/health']
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
+
+  # ── Backend Task + Service ────────────────────────────────────────────────
+  BackendTaskDef:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: eventflow-backend
@@ -245,18 +251,17 @@ Resources:
       TaskRoleArn: !GetAtt TaskRole.Arn
       ContainerDefinitions:
         - Name: backend
-          Image: !Ref EcrImageUri
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/eventflow-backend:latest'
           PortMappings:
-            - ContainerPort: 4000
-              Protocol: tcp
+            - { ContainerPort: 4000, Protocol: tcp }
           Environment:
-            - { Name: AWS_REGION,       Value: !Ref AWS::Region }
-            - { Name: DYNAMODB_TABLE,   Value: !Ref TableName }
-            - { Name: S3_BUCKET,        Value: !Sub 'eventflow-layouts-${AWS::AccountId}' }
-            - { Name: FRONTEND_URL,     Value: !Ref FrontendUrl }
-            - { Name: NODE_ENV,         Value: production }
-            - { Name: PORT,             Value: '4000' }
-            - { Name: JWT_SECRET,       Value: !Ref JwtSecret }
+            - { Name: AWS_REGION,     Value: !Ref AWS::Region }
+            - { Name: DYNAMODB_TABLE, Value: !Ref TableName }
+            - { Name: S3_BUCKET,      Value: !Sub 'eventflow-layouts-${AWS::AccountId}' }
+            - { Name: NODE_ENV,       Value: production }
+            - { Name: PORT,           Value: '4000' }
+            - { Name: JWT_SECRET,     Value: !Ref JwtSecret }
+            - { Name: FRONTEND_URL,   Value: !Sub 'http://${AppAlb.DNSName}' }
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -264,15 +269,14 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
 
-  # ── ECS Service ───────────────────────────────────────────────────────────
-  EcsService:
+  BackendService:
     Type: AWS::ECS::Service
-    DependsOn: BackendListener
+    DependsOn: [AppListener, ApiListenerRule]
     Properties:
       ServiceName: eventflow-backend
       Cluster: !Ref EcsCluster
-      TaskDefinition: !Ref TaskDefinition
-      DesiredCount: !Ref DesiredCount
+      TaskDefinition: !Ref BackendTaskDef
+      DesiredCount: !Ref BackendDesiredCount
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -284,21 +288,64 @@ Resources:
           ContainerPort: 4000
           TargetGroupArn: !Ref BackendTargetGroup
       DeploymentConfiguration:
-        MinimumHealthyPercent: 50
+        MinimumHealthyPercent: 0
         MaximumPercent: 200
 
-# ─── OUTPUTS ──────────────────────────────────────────────────────────────────
-Outputs:
-  BackendUrl:
-    Description: Backend API base URL (set as NEXT_PUBLIC_API_URL in frontend)
-    Value: !Sub 'http://${BackendAlb.DNSName}/api'
+  # ── Frontend Task + Service ───────────────────────────────────────────────
+  FrontendTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: eventflow-frontend
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: frontend
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/eventflow-frontend:latest'
+          PortMappings:
+            - { ContainerPort: 3000, Protocol: tcp }
+          Environment:
+            - { Name: NODE_ENV, Value: production }
+            - { Name: PORT,     Value: '3000' }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/eventflow-frontend
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
 
-  EcrRepositoryUri:
-    Description: ECR repository URI (push your Docker image here)
+  FrontendService:
+    Type: AWS::ECS::Service
+    DependsOn: AppListener
+    Properties:
+      ServiceName: eventflow-frontend
+      Cluster: !Ref EcsCluster
+      TaskDefinition: !Ref FrontendTaskDef
+      DesiredCount: !Ref FrontendDesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !Ref PublicSubnetIds
+          SecurityGroups: [!Ref EcsSg]
+      LoadBalancers:
+        - ContainerName: frontend
+          ContainerPort: 3000
+          TargetGroupArn: !Ref FrontendTargetGroup
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 200
+
+Outputs:
+  AppUrl:
+    Description: Application URL (frontend + backend on same ALB)
+    Value: !Sub 'http://${AppAlb.DNSName}'
+
+  BackendEcrUri:
     Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/eventflow-backend'
 
-  DynamoTableName:
-    Value: !Ref EventFlowTable
-
-  S3BucketName:
-    Value: !Ref LayoutsBucket
+  FrontendEcrUri:
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/eventflow-frontend'
