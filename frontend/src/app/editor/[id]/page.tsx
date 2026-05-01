@@ -14,6 +14,8 @@ import type Konva from 'konva';
 // Dynamically import canvas to avoid SSR issues
 const CanvasEditor = dynamic(() => import('../../../components/canvas/CanvasEditor'), { ssr: false });
 
+export function generateStaticParams() { return []; }
+
 export default function EditorPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();

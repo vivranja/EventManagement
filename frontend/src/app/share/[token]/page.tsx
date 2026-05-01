@@ -9,6 +9,8 @@ import type Konva from 'konva';
 
 const CanvasEditor = dynamic(() => import('../../../components/canvas/CanvasEditor'), { ssr: false });
 
+export function generateStaticParams() { return []; }
+
 export default function SharePage() {
   const { token } = useParams<{ token: string }>();
   const stageRef = useRef<Konva.Stage | null>(null);
