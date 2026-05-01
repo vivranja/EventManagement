@@ -67,7 +67,7 @@ Resources:
         RestrictPublicBuckets: true
 
   # ── ECR ───────────────────────────────────────────────────────────────────
-  BackendEcrRepo:
+  EcrRepository:
     Type: AWS::ECR::Repository
     DeletionPolicy: Retain
     Properties:
@@ -129,7 +129,7 @@ Resources:
                 Resource: !Sub 'arn:aws:s3:::eventflow-layouts-${AWS::AccountId}/*'
 
   # ── CloudWatch ────────────────────────────────────────────────────────────
-  BackendLogGroup:
+  LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /ecs/eventflow-backend
@@ -239,7 +239,7 @@ Resources:
           TargetGroupArn: !Ref BackendTargetGroup
 
   # ── Backend Task + Service ────────────────────────────────────────────────
-  BackendTaskDef:
+  TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: eventflow-backend
@@ -269,13 +269,13 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
 
-  BackendService:
+  EcsService:
     Type: AWS::ECS::Service
     DependsOn: [AppListener, ApiListenerRule]
     Properties:
       ServiceName: eventflow-backend
       Cluster: !Ref EcsCluster
-      TaskDefinition: !Ref BackendTaskDef
+      TaskDefinition: !Ref TaskDefinition
       DesiredCount: !Ref BackendDesiredCount
       LaunchType: FARGATE
       NetworkConfiguration:
