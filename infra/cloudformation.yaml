@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: EventFlow - DynamoDB + S3 + ECS Fargate (backend + frontend) + ALB
+Description: EventFlow - ECS Fargate (backend + frontend) + ALB (ECR repos managed outside CF)
 
 Parameters:
   VpcId:
@@ -20,64 +20,6 @@ Parameters:
     Default: 1
 
 Resources:
-
-  # ── DynamoDB ──────────────────────────────────────────────────────────────
-  EventFlowTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    Properties:
-      TableName: !Ref TableName
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - { AttributeName: pk,     AttributeType: S }
-        - { AttributeName: sk,     AttributeType: S }
-        - { AttributeName: gsi1pk, AttributeType: S }
-        - { AttributeName: gsi1sk, AttributeType: S }
-        - { AttributeName: gsi2pk, AttributeType: S }
-        - { AttributeName: gsi2sk, AttributeType: S }
-      KeySchema:
-        - { AttributeName: pk, KeyType: HASH }
-        - { AttributeName: sk, KeyType: RANGE }
-      GlobalSecondaryIndexes:
-        - IndexName: GSI1
-          KeySchema:
-            - { AttributeName: gsi1pk, KeyType: HASH }
-            - { AttributeName: gsi1sk, KeyType: RANGE }
-          Projection: { ProjectionType: ALL }
-        - IndexName: GSI2
-          KeySchema:
-            - { AttributeName: gsi2pk, KeyType: HASH }
-            - { AttributeName: gsi2sk, KeyType: RANGE }
-          Projection: { ProjectionType: ALL }
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-
-  # ── S3 ────────────────────────────────────────────────────────────────────
-  LayoutsBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    Properties:
-      BucketName: !Sub 'eventflow-layouts-${AWS::AccountId}'
-      VersioningConfiguration:
-        Status: Enabled
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-
-  # ── ECR ───────────────────────────────────────────────────────────────────
-  EcrRepository:
-    Type: AWS::ECR::Repository
-    DeletionPolicy: Retain
-    Properties:
-      RepositoryName: eventflow-backend
-
-  FrontendEcrRepo:
-    Type: AWS::ECR::Repository
-    DeletionPolicy: Retain
-    Properties:
-      RepositoryName: eventflow-frontend
 
   # ── IAM ───────────────────────────────────────────────────────────────────
   TaskExecutionRole:
@@ -118,8 +60,8 @@ Resources:
                   - dynamodb:BatchGetItem
                   - dynamodb:BatchWriteItem
                 Resource:
-                  - !GetAtt EventFlowTable.Arn
-                  - !Sub '${EventFlowTable.Arn}/index/*'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/*'
         - PolicyName: S3Access
           PolicyDocument:
             Version: '2012-10-17'
@@ -129,7 +71,7 @@ Resources:
                 Resource: !Sub 'arn:aws:s3:::eventflow-layouts-${AWS::AccountId}/*'
 
   # ── CloudWatch ────────────────────────────────────────────────────────────
-  LogGroup:
+  BackendLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /ecs/eventflow-backend
@@ -239,7 +181,7 @@ Resources:
           TargetGroupArn: !Ref BackendTargetGroup
 
   # ── Backend Task + Service ────────────────────────────────────────────────
-  TaskDefinition:
+  BackendTaskDef:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: eventflow-backend
@@ -269,13 +211,13 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
 
-  EcsService:
+  BackendService:
     Type: AWS::ECS::Service
     DependsOn: [AppListener, ApiListenerRule]
     Properties:
       ServiceName: eventflow-backend
       Cluster: !Ref EcsCluster
-      TaskDefinition: !Ref TaskDefinition
+      TaskDefinition: !Ref BackendTaskDef
       DesiredCount: !Ref BackendDesiredCount
       LaunchType: FARGATE
       NetworkConfiguration:
