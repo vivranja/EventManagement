@@ -34,6 +34,7 @@ export interface LayoutJSON {
   venueHeight: number;
   elements: CanvasElement[];
   background: string;
+  backgroundOpacity?: number;
   gridSize: number;
   createdAt: string;
   updatedAt: string;
