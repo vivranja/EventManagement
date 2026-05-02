@@ -1,10 +1,15 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Toaster } from 'react-hot-toast';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'EventFlow — 2D Event Layout Planner',
   description: 'Professional event layout planning, drag-and-drop canvas editor, and collaboration platform.',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
