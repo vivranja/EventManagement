@@ -44,6 +44,11 @@ interface EditorState {
   venueWidth: number;
   venueHeight: number;
 
+  backgroundImageUrl: string | null;
+  backgroundOpacity: number;
+  setBackgroundImage: (url: string | null) => void;
+  setBackgroundOpacity: (opacity: number) => void;
+
   setElements: (els: CanvasElement[]) => void;
   addElement: (el: CanvasElement) => void;
   updateElement: (id: string, updates: Partial<CanvasElement>) => void;
@@ -54,7 +59,7 @@ interface EditorState {
   setSnap: (v: boolean) => void;
   setZoom: (z: number) => void;
   setVenueDimensions: (w: number, h: number) => void;
-  loadLayout: (els: CanvasElement[], w: number, h: number) => void;
+  loadLayout: (els: CanvasElement[], w: number, h: number, bgUrl?: string | null, bgOpacity?: number) => void;
   undo: () => void;
   redo: () => void;
   pushHistory: () => void;
@@ -76,6 +81,11 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   isDirty: false,
   venueWidth: 1000,
   venueHeight: 750,
+  backgroundImageUrl: null,
+  backgroundOpacity: 1,
+
+  setBackgroundImage: (backgroundImageUrl) => set({ backgroundImageUrl }),
+  setBackgroundOpacity: (backgroundOpacity) => set({ backgroundOpacity, isDirty: true }),
 
   setElements: (elements) => set({ elements, isDirty: true }),
 
@@ -108,8 +118,8 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   setZoom: (zoom) => set({ zoom: Math.max(0.2, Math.min(3, zoom)) }),
   setVenueDimensions: (venueWidth, venueHeight) => set({ venueWidth, venueHeight }),
 
-  loadLayout: (elements, venueWidth, venueHeight) =>
-    set({ elements, venueWidth, venueHeight, isDirty: false, history: [], historyIndex: -1, selectedId: null }),
+  loadLayout: (elements, venueWidth, venueHeight, bgUrl = null, bgOpacity = 1) =>
+    set({ elements, venueWidth, venueHeight, backgroundImageUrl: bgUrl, backgroundOpacity: bgOpacity, isDirty: false, history: [], historyIndex: -1, selectedId: null }),
 
   pushHistory: () => {
     const { elements, history, historyIndex } = get();

@@ -1,4 +1,5 @@
 'use client';
+import { useRef } from 'react';
 import Link from 'next/link';
 import { Project, Layout } from '../../types';
 import { useEditorStore } from '../../store';
@@ -14,14 +15,18 @@ interface Props {
   onToggleGrid: () => void;
   onToggleSnap: () => void;
   onClearCanvas: () => void;
+  onUploadBackground: (file: File) => void;
+  onRemoveBackground: () => void;
 }
 
 export default function EditorToolbar({
   project, activeLayout, saving,
   onSave, onExportPNG, onExportPDF, onShare,
   onToggleGrid, onToggleSnap, onClearCanvas,
+  onUploadBackground, onRemoveBackground,
 }: Props) {
-  const { isDirty, gridEnabled, snapEnabled, zoom, setZoom, undo, redo, history, historyIndex } = useEditorStore();
+  const { isDirty, gridEnabled, snapEnabled, zoom, setZoom, undo, redo, history, historyIndex, backgroundImageUrl, backgroundOpacity, setBackgroundOpacity } = useEditorStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
@@ -82,6 +87,28 @@ export default function EditorToolbar({
 
       {/* Clear */}
       <button className="btn btn-ghost btn-sm" onClick={onClearCanvas} style={{ fontSize: 11, color: 'var(--red)', borderColor: 'rgba(248,113,113,.2)' }}>Clear</button>
+
+      <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
+
+      {/* Background image */}
+      <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+        onChange={e => { const f = e.target.files?.[0]; if (f) { onUploadBackground(f); e.target.value = ''; } }} />
+      <button className="btn btn-ghost btn-sm" onClick={() => fileInputRef.current?.click()}
+        style={{ fontSize: 11, background: backgroundImageUrl ? 'var(--accent-d)' : undefined, borderColor: backgroundImageUrl ? 'var(--accent)' : undefined, color: backgroundImageUrl ? 'var(--accent2)' : undefined }}>
+        {backgroundImageUrl ? '⌂ BG' : '⌂ Add BG'}
+      </button>
+      {backgroundImageUrl && (
+        <>
+          <input type="range" min={10} max={100} step={5} value={Math.round(backgroundOpacity * 100)}
+            onChange={e => setBackgroundOpacity(Number(e.target.value) / 100)}
+            title="Background opacity"
+            style={{ width: 64, accentColor: 'var(--accent)' }} />
+          <span style={{ fontSize: 10, color: 'var(--text3)', minWidth: 26 }}>{Math.round(backgroundOpacity * 100)}%</span>
+          <button className="btn btn-ghost btn-sm" onClick={onRemoveBackground}
+            title="Remove background image"
+            style={{ fontSize: 11, color: 'var(--text3)', padding: '4px 6px' }}>✕</button>
+        </>
+      )}
 
       {/* Export */}
       <div style={{ position: 'relative', display: 'flex', gap: 4 }}>

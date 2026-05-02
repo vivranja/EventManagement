@@ -1,15 +1,24 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
 import {
   PutCommand, GetCommand, QueryCommand, UpdateCommand, DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { dynamo, TABLE } from '../lib/dynamo';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { putLayoutJson, getLayoutJson, deleteLayoutJson } from '../lib/s3';
+import { putLayoutJson, getLayoutJson, deleteLayoutJson, putImageFile, getPresignedUrl } from '../lib/s3';
 
 const router = Router();
 router.use(authenticate);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    cb(null, file.mimetype.startsWith('image/'));
+  },
+});
 
 async function checkProjectAccess(
   projectId: string,
@@ -55,8 +64,11 @@ router.get('/:projectId', async (req: AuthRequest, res: Response) => {
 
   const layouts = await Promise.all(
     sorted.map(async layout => {
-      const layoutJson = layout.s3Key ? await getLayoutJson(layout.s3Key as string) : null;
-      return { ...layout, layoutJson };
+      const [layoutJson, backgroundImageUrl] = await Promise.all([
+        layout.s3Key ? getLayoutJson(layout.s3Key as string) : null,
+        layout.backgroundImageKey ? getPresignedUrl(layout.backgroundImageKey as string) : null,
+      ]);
+      return { ...layout, layoutJson, backgroundImageUrl };
     }),
   );
 
@@ -111,11 +123,67 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     };
 
     await dynamo.send(new PutCommand({ TableName: TABLE, Item: layoutItem }));
-    res.status(201).json({ layout: { ...layoutItem, layoutJson: data.layoutJson } });
+    res.status(201).json({ layout: { ...layoutItem, layoutJson: data.layoutJson, backgroundImageUrl: null } });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors[0].message });
     throw err;
   }
+});
+
+// PUT /api/layouts/:id/background — upload floor plan image
+router.put('/:id/background', upload.single('image'), async (req: AuthRequest, res: Response) => {
+  const file = (req as AuthRequest & { file?: Express.Multer.File }).file;
+  if (!file) return res.status(400).json({ error: 'No image file provided' });
+
+  const layoutResult = await dynamo.send(new GetCommand({
+    TableName: TABLE,
+    Key: { pk: `LAYOUT#${req.params.id}`, sk: `LAYOUT#${req.params.id}` },
+  }));
+  const layout = layoutResult.Item;
+  if (!layout) return res.status(404).json({ error: 'Layout not found' });
+
+  const project = await checkProjectAccess(layout.projectId as string, req.user!.id, false);
+  if (!project) return res.status(403).json({ error: 'No permission' });
+
+  const bgKey = `backgrounds/${layout.projectId}/${req.params.id}`;
+  await putImageFile(bgKey, file.buffer, file.mimetype);
+
+  await dynamo.send(new UpdateCommand({
+    TableName: TABLE,
+    Key: { pk: `LAYOUT#${req.params.id}`, sk: `LAYOUT#${req.params.id}` },
+    UpdateExpression: 'SET backgroundImageKey = :key, updatedAt = :now',
+    ExpressionAttributeValues: { ':key': bgKey, ':now': new Date().toISOString() },
+  }));
+
+  const backgroundImageUrl = await getPresignedUrl(bgKey);
+  res.json({ backgroundImageUrl });
+});
+
+// DELETE /api/layouts/:id/background — remove floor plan image
+router.delete('/:id/background', async (req: AuthRequest, res: Response) => {
+  const layoutResult = await dynamo.send(new GetCommand({
+    TableName: TABLE,
+    Key: { pk: `LAYOUT#${req.params.id}`, sk: `LAYOUT#${req.params.id}` },
+  }));
+  const layout = layoutResult.Item;
+  if (!layout) return res.status(404).json({ error: 'Layout not found' });
+
+  const project = await checkProjectAccess(layout.projectId as string, req.user!.id, false);
+  if (!project) return res.status(403).json({ error: 'No permission' });
+
+  if (layout.backgroundImageKey) {
+    await Promise.all([
+      deleteLayoutJson(layout.backgroundImageKey as string),
+      dynamo.send(new UpdateCommand({
+        TableName: TABLE,
+        Key: { pk: `LAYOUT#${req.params.id}`, sk: `LAYOUT#${req.params.id}` },
+        UpdateExpression: 'REMOVE backgroundImageKey SET updatedAt = :now',
+        ExpressionAttributeValues: { ':now': new Date().toISOString() },
+      })),
+    ]);
+  }
+
+  res.json({ message: 'Background removed' });
 });
 
 // PUT /api/layouts/:id
@@ -149,8 +217,11 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
   }));
 
   const updatedLayout = result.Attributes!;
-  const layoutJson = req.body.layoutJson ?? await getLayoutJson(layout.s3Key as string);
-  res.json({ layout: { ...updatedLayout, layoutJson } });
+  const [layoutJson, backgroundImageUrl] = await Promise.all([
+    req.body.layoutJson ?? getLayoutJson(layout.s3Key as string),
+    updatedLayout.backgroundImageKey ? getPresignedUrl(updatedLayout.backgroundImageKey as string) : null,
+  ]);
+  res.json({ layout: { ...updatedLayout, layoutJson, backgroundImageUrl } });
 });
 
 // DELETE /api/layouts/:id
@@ -170,13 +241,17 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ error: 'No permission' });
   }
 
-  await Promise.all([
+  const deleteOps: Promise<unknown>[] = [
     deleteLayoutJson(layout.s3Key as string),
     dynamo.send(new DeleteCommand({
       TableName: TABLE,
       Key: { pk: `LAYOUT#${req.params.id}`, sk: `LAYOUT#${req.params.id}` },
     })),
-  ]);
+  ];
+  if (layout.backgroundImageKey) {
+    deleteOps.push(deleteLayoutJson(layout.backgroundImageKey as string));
+  }
+  await Promise.all(deleteOps);
 
   res.json({ message: 'Layout deleted' });
 });

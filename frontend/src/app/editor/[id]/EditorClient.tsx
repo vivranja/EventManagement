@@ -21,6 +21,7 @@ export default function EditorClient() {
 
   const {
     elements, selectedId, venueWidth, venueHeight,
+    backgroundOpacity, setBackgroundImage,
     addElement, updateElement, removeElement, duplicateElement,
     selectElement, loadLayout,
     setGrid, setSnap, gridEnabled, snapEnabled,
@@ -53,7 +54,8 @@ export default function EditorClient() {
       if (latest) {
         setActiveLayout(latest);
         const lj = latest.layoutJson;
-        loadLayout(lj.elements || [], lj.venueWidth || proj.venueWidth, lj.venueHeight || proj.venueHeight);
+        loadLayout(lj.elements || [], lj.venueWidth || proj.venueWidth, lj.venueHeight || proj.venueHeight,
+          (latest as any).backgroundImageUrl || null, lj.backgroundOpacity ?? 1);
       } else {
         loadLayout([], proj.venueWidth, proj.venueHeight);
       }
@@ -79,6 +81,7 @@ export default function EditorClient() {
         venueHeight,
         elements,
         background: '#1a1a2e',
+        backgroundOpacity,
         gridSize: 20,
         createdAt: activeLayout?.layoutJson.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -109,6 +112,31 @@ export default function EditorClient() {
       toast.error('Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleUploadBackground = async (file: File) => {
+    if (!activeLayout) {
+      toast.error('Save the layout first before adding a background image');
+      return;
+    }
+    try {
+      const res = await layoutsApi.uploadBackground(activeLayout.id, file);
+      setBackgroundImage(res.data.backgroundImageUrl);
+      toast.success('Background image uploaded');
+    } catch {
+      toast.error('Failed to upload background image');
+    }
+  };
+
+  const handleRemoveBackground = async () => {
+    if (!activeLayout) return;
+    try {
+      await layoutsApi.removeBackground(activeLayout.id);
+      setBackgroundImage(null);
+      toast.success('Background removed');
+    } catch {
+      toast.error('Failed to remove background');
     }
   };
 
@@ -208,6 +236,8 @@ export default function EditorClient() {
         onToggleGrid={() => setGrid(!gridEnabled)}
         onToggleSnap={() => setSnap(!snapEnabled)}
         onClearCanvas={handleClearCanvas}
+        onUploadBackground={handleUploadBackground}
+        onRemoveBackground={handleRemoveBackground}
       />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <ElementPalette onAdd={handleAddElement} />

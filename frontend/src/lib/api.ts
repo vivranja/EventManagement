@@ -42,4 +42,10 @@ export const layoutsApi = {
   create: (d: object) => api.post('/layouts', d),
   update: (id: string, d: object) => api.put(`/layouts/${id}`, d),
   delete: (id: string) => api.delete(`/layouts/${id}`),
+  uploadBackground: (id: string, file: File) => {
+    const form = new FormData();
+    form.append('image', file);
+    return api.put(`/layouts/${id}/background`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  removeBackground: (id: string) => api.delete(`/layouts/${id}/background`),
 };

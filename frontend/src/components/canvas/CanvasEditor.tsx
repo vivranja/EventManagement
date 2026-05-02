@@ -1,9 +1,15 @@
 'use client';
 import { useRef, useCallback, useEffect } from 'react';
-import { Stage, Layer, Rect, Line } from 'react-konva';
+import { Stage, Layer, Rect, Line, Image as KonvaImage } from 'react-konva';
+import useImage from 'use-image';
 import { useEditorStore } from '../../store';
 import ElementShape from './ElementShape';
 import type Konva from 'konva';
+
+function BackgroundImageLayer({ url, width, height, opacity }: { url: string; width: number; height: number; opacity: number }) {
+  const [img] = useImage(url, 'anonymous');
+  return img ? <KonvaImage image={img} x={0} y={0} width={width} height={height} opacity={opacity} listening={false} /> : null;
+}
 
 interface Props {
   stageRef: React.RefObject<Konva.Stage>;
@@ -13,9 +19,9 @@ export default function CanvasEditor({ stageRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const {
     elements, selectedId, gridEnabled, gridSize, snapEnabled, zoom,
-    venueWidth, venueHeight,
+    venueWidth, venueHeight, backgroundImageUrl, backgroundOpacity,
     selectElement, updateElement, removeElement, duplicateElement,
-    setZoom, bringForward, sendBackward, pushHistory,
+    setZoom, pushHistory,
   } = useEditorStore();
 
   // Keyboard shortcuts
@@ -111,6 +117,11 @@ export default function CanvasEditor({ stageRef }: Props) {
             shadowBlur={20}
             shadowColor="rgba(108,99,255,0.15)"
           />
+
+          {/* Floor plan background image */}
+          {backgroundImageUrl && (
+            <BackgroundImageLayer url={backgroundImageUrl} width={venueWidth} height={venueHeight} opacity={backgroundOpacity} />
+          )}
 
           {/* Grid */}
           {gridLines}
