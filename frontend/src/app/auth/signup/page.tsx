@@ -32,14 +32,16 @@ export default function SignupPage() {
     setForm(prev => ({ ...prev, [k]: e.target.value }));
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32, background: 'var(--bg)' }}>
-      <div style={{ width: '100%', maxWidth: 440 }} className="anim-fade-up">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 32 }}>
-          <div style={{ width: 32, height: 32, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>⬡</div>
-          <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700 }}>EventFlow</span>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32, background: 'var(--bg)', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', width: 500, height: 500, borderRadius: '50%', top: '-100px', right: '-100px', background: 'radial-gradient(circle,rgba(124,58,237,0.08) 0%,transparent 70%)', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', width: 400, height: 400, borderRadius: '50%', bottom: '-80px', left: '-80px', background: 'radial-gradient(circle,rgba(232,121,249,0.06) 0%,transparent 70%)', pointerEvents: 'none' }} />
+      <div style={{ width: '100%', maxWidth: 440, position: 'relative', zIndex: 1 }} className="anim-fade-up">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 32 }}>
+          <div style={{ width: 34, height: 34, background: 'linear-gradient(135deg,#7c3aed,#e879f9)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, boxShadow: '0 0 16px rgba(124,58,237,0.5)' }}>⬡</div>
+          <span style={{ fontFamily: "'Playfair Display',serif", fontSize: 19, fontWeight: 700 }}>EventFlow</span>
         </div>
 
-        <h2 style={{ fontSize: 26, fontWeight: 700, marginBottom: 6 }}>Create account</h2>
+        <h2 style={{ fontSize: 28, fontWeight: 700, marginBottom: 7, letterSpacing: '-.02em' }}>Create account</h2>
         <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 28 }}>Start planning beautiful events today.</p>
 
         <form onSubmit={handle} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
